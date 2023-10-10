@@ -45,7 +45,7 @@ class TitanicTestDataset(Dataset):
 
 
 class TitanicModel(nn.Module):
-    def __init__(self, n_input, n_output):
+    def __init__(self, n_input):
         super().__init__()
 
         self.model = nn.Sequential(
@@ -53,16 +53,17 @@ class TitanicModel(nn.Module):
             nn.ReLU(),
             nn.Linear(30, 30),
             nn.ReLU(),
-            nn.Linear(30, n_output),
+            nn.Linear(30, 2),
         )
 
     def forward(self, x):
         x = self.model(x)
+        x = torch.argmax(x, dim=1)
         return x
 
 
 def get_model_and_optimizer():
-    model = TitanicModel(n_input=11, n_output=2)
+    model = TitanicModel(n_input=11)
     optimizer = optim.SGD(model.parameters(), lr=wandb.config.learning_rate)
 
     return model, optimizer
@@ -74,6 +75,7 @@ def get_data():
     test_data_path = os.path.join(PATH, "test.csv")
     train_df = pd.read_csv(train_data_path)
     test_df = pd.read_csv(test_data_path)
+
     all_df = pd.concat([train_df, test_df], sort=False)
     all_df = preprocess(all_df)
 
@@ -94,7 +96,8 @@ def get_data():
 
 
 def preprocess(dataset):
-    print("Preprocessing dataset...")
+    print("Preprocessing...", end='')
+
     # adjust fare
     Fare_mean = dataset[["Pclass", "Fare"]].groupby("Pclass").mean().reset_index()
     Fare_mean.columns = ["Pclass", "Fare_mean"]
@@ -145,6 +148,7 @@ def preprocess(dataset):
             le = le.fit(dataset[category_feature])
             dataset[category_feature] = le.transform(dataset[category_feature])
 
+    print("DONE")
     return dataset
 
 
@@ -158,22 +162,24 @@ def train(model, optimizer, train_data_loader, validation_data_loader):
     for epoch in range(1, n_epochs + 1):
         loss_train = 0.0
         num_trains = 0
-        for train_batch in train_data_loader:
-            output_train = model(train_batch['input'])
-            loss = loss_fn(output_train, train_batch['target'])
+        for batch in train_data_loader:
+            output = model(batch['input']).float().requires_grad_(True)
+            target = batch['target'].float()
+            loss = loss_fn(output, target)
             loss_train += loss.item()
             num_trains += 1
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            optimizer.zero_grad()  # purge gradients
+            loss.backward()  # compute gradient
+            optimizer.step()  # update parameters
 
         loss_validation = 0.0
         num_validations = 0
         with torch.no_grad():
             for validation_batch in validation_data_loader:
-                output_validation = model(validation_batch['input'])
-                loss = loss_fn(output_validation, validation_batch['target'])
+                output_validation = model(validation_batch['input']).float()
+                target_validation = validation_batch['target'].float()
+                loss = loss_fn(output_validation, target_validation)
                 loss_validation += loss.item()
                 num_validations += 1
 
@@ -193,14 +199,16 @@ def train(model, optimizer, train_data_loader, validation_data_loader):
 
 
 def test(test_data_loader):
-    print("Testing model...")
+    print("Testing model...", end='')
+
     batch = next(iter(test_data_loader))
     print("{0}".format(batch['input'].shape))
-    my_model = TitanicModel(n_input=11, n_output=2)
+    my_model = TitanicModel(n_input=11)
     output_batch = my_model(batch['input'])
-    prediction_batch = torch.argmax(output_batch, dim=1)
-    for idx, prediction in enumerate(prediction_batch, start=892):
+    for idx, prediction in enumerate(output_batch, start=892):
         print(idx, prediction.item())
+
+    print("DONE")
 
 
 def main(args):
@@ -214,9 +222,9 @@ def main(args):
 
     wandb.init(
         mode="online" if args.wandb else "disabled",
-        project="my_model_training",
-        notes="My first wandb experiment",
-        tags=["my_model", "california_housing"],
+        project="titanic_dataset",
+        notes="Titanic dataset prediction model",
+        tags=["pytorch", "titanic"],
         name=current_time_str,
         config=config
     )
@@ -229,6 +237,7 @@ def main(args):
     wandb.watch(model)
     train(model, optimizer, train_data_loader, validation_data_loader)
     wandb.finish()
+
     test(test_data_loader)
 
 
