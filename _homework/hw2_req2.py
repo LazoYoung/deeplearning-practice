@@ -215,6 +215,7 @@ def main(args):
         'n_hidden_unit_list': [20, 20],
     }
 
+    wandb.login()
     wandb.init(
         mode="online" if args.wandb else "disabled",
         project="titanic_dataset",
