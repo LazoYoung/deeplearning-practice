@@ -59,7 +59,6 @@ class TitanicModel(nn.Module):
     def forward(self, x):
         x = self.model(x)
         x = x.squeeze()
-        # x = torch.argmax(x, dim=1)
         return x
 
 
@@ -195,9 +194,6 @@ def train(model, optimizer, train_data_loader, validation_data_loader):
                 f"Training loss {loss_train / num_trains:.4f}, "
                 f"Validation loss {loss_validation / num_validations:.4f}"
             )
-            # todo parameter never changes
-            # for name, param in model.named_parameters():
-            #     print(f"{name} - {param}")
             next_print_epoch += 100
 
 
