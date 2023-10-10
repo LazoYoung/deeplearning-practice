@@ -1,1 +1,4 @@
 /.idea
+
+# wandb runs
+/_homework/wandb
