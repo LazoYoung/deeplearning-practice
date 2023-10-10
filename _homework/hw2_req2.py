@@ -53,12 +53,13 @@ class TitanicModel(nn.Module):
             nn.ReLU(),
             nn.Linear(30, 30),
             nn.ReLU(),
-            nn.Linear(30, 2),
+            nn.Linear(30, 1),
         )
 
     def forward(self, x):
         x = self.model(x)
-        x = torch.argmax(x, dim=1)
+        x = x.squeeze()
+        # x = torch.argmax(x, dim=1)
         return x
 
 
@@ -96,7 +97,7 @@ def get_data():
 
 
 def preprocess(dataset):
-    print("Preprocessing...", end='')
+    print("Preprocessing...")
 
     # adjust fare
     Fare_mean = dataset[["Pclass", "Fare"]].groupby("Pclass").mean().reset_index()
@@ -148,7 +149,6 @@ def preprocess(dataset):
             le = le.fit(dataset[category_feature])
             dataset[category_feature] = le.transform(dataset[category_feature])
 
-    print("DONE")
     return dataset
 
 
@@ -163,7 +163,7 @@ def train(model, optimizer, train_data_loader, validation_data_loader):
         loss_train = 0.0
         num_trains = 0
         for batch in train_data_loader:
-            output = model(batch['input']).float().requires_grad_(True)
+            output = model(batch['input'])
             target = batch['target'].float()
             loss = loss_fn(output, target)
             loss_train += loss.item()
@@ -177,7 +177,7 @@ def train(model, optimizer, train_data_loader, validation_data_loader):
         num_validations = 0
         with torch.no_grad():
             for validation_batch in validation_data_loader:
-                output_validation = model(validation_batch['input']).float()
+                output_validation = model(validation_batch['input'])
                 target_validation = validation_batch['target'].float()
                 loss = loss_fn(output_validation, target_validation)
                 loss_validation += loss.item()
@@ -195,20 +195,19 @@ def train(model, optimizer, train_data_loader, validation_data_loader):
                 f"Training loss {loss_train / num_trains:.4f}, "
                 f"Validation loss {loss_validation / num_validations:.4f}"
             )
+            # todo parameter never changes
+            # for name, param in model.named_parameters():
+            #     print(f"{name} - {param}")
             next_print_epoch += 100
 
 
-def test(test_data_loader):
-    print("Testing model...", end='')
+def test(model, test_data_loader):
+    print("Testing model...")
 
     batch = next(iter(test_data_loader))
-    print("{0}".format(batch['input'].shape))
-    my_model = TitanicModel(n_input=11)
-    output_batch = my_model(batch['input'])
+    output_batch = model(batch['input']).round().long()
     for idx, prediction in enumerate(output_batch, start=892):
         print(idx, prediction.item())
-
-    print("DONE")
 
 
 def main(args):
@@ -216,7 +215,7 @@ def main(args):
     config = {
         'epochs': args.epoch,
         'batch_size': args.batch_size,
-        'learning_rate': 1e-3,
+        'learning_rate': args.learning_rate,
         'n_hidden_unit_list': [20, 20],
     }
 
@@ -238,7 +237,7 @@ def main(args):
     train(model, optimizer, train_data_loader, validation_data_loader)
     wandb.finish()
 
-    test(test_data_loader)
+    test(model, test_data_loader)
 
 
 if __name__ == "__main__":
@@ -251,6 +250,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-e", "--epoch", type=int, default=1_000, help="Number of training epochs (default: 1000)"
+    )
+    parser.add_argument(
+        "-lr", "--learning_rate", type=float, default=1e-3, help="Learning rate (default: 1e-3)"
     )
     args = parser.parse_args()
 
