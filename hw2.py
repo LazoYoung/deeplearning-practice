@@ -70,7 +70,7 @@ def get_model_and_optimizer():
 
 
 def get_data():
-    PATH = os.path.join(os.path.pardir, "_00_data", "0_titanic")
+    PATH = os.path.join("_00_data", "0_titanic")
     train_data_path = os.path.join(PATH, "train.csv")
     test_data_path = os.path.join(PATH, "test.csv")
     train_df = pd.read_csv(train_data_path)
