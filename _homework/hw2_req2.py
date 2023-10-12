@@ -49,11 +49,11 @@ class TitanicModel(nn.Module):
         super().__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(n_input, 30),
-            nn.ReLU(),
-            nn.Linear(30, 30),
-            nn.ReLU(),
-            nn.Linear(30, 1),
+            nn.Linear(n_input, wandb.config.n_hidden_unit_list[0]),
+            nn.PReLU(),
+            nn.Linear(wandb.config.n_hidden_unit_list[0], wandb.config.n_hidden_unit_list[1]),
+            nn.PReLU(),
+            nn.Linear(wandb.config.n_hidden_unit_list[1], 1),
         )
 
     def forward(self, x):
@@ -212,7 +212,7 @@ def main(args):
         'epochs': args.epoch,
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
-        'n_hidden_unit_list': [20, 20],
+        'n_hidden_unit_list': [30, 30],
     }
 
     wandb.login()
