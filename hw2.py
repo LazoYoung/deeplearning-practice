@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -50,9 +51,9 @@ class TitanicModel(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(n_input, wandb.config.n_hidden_unit_list[0]),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.1),
             nn.Linear(wandb.config.n_hidden_unit_list[0], wandb.config.n_hidden_unit_list[1]),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.1),
             nn.Linear(wandb.config.n_hidden_unit_list[1], 1),
         )
 
@@ -69,13 +70,18 @@ def get_model_and_optimizer():
     return model, optimizer
 
 
-def get_data():
+def get_dataframe():
     PATH = os.path.join("_00_data", "0_titanic")
-    train_data_path = os.path.join(PATH, "train.csv")
     test_data_path = os.path.join(PATH, "test.csv")
-    train_df = pd.read_csv(train_data_path)
+    train_data_path = os.path.join(PATH, "train.csv")
     test_df = pd.read_csv(test_data_path)
+    train_df = pd.read_csv(train_data_path)
 
+    return train_df, test_df
+
+
+def get_data():
+    train_df, test_df = get_dataframe()
     all_df = pd.concat([train_df, test_df], sort=False)
     all_df = preprocess(all_df)
 
@@ -202,8 +208,17 @@ def test(model, test_data_loader):
 
     batch = next(iter(test_data_loader))
     output_batch = model(batch['input']).round().long()
-    for idx, prediction in enumerate(output_batch, start=892):
-        print(idx, prediction.item())
+    prediction = output_batch.detach().numpy()
+    test_df = get_dataframe()[1]
+    pax_id = np.array(test_df["PassengerId"])
+    data = np.column_stack([pax_id, prediction])
+    solution = pd.DataFrame(
+        data=data,
+        columns=["PassengerId", "Survived"]
+    ).astype(int)
+    solution.to_csv("submission.csv", index=False)
+
+    print("Result saved.")
 
 
 def main(args):
@@ -249,7 +264,7 @@ if __name__ == "__main__":
         "-e", "--epoch", type=int, default=1_000, help="Number of training epochs (default: 1000)"
     )
     parser.add_argument(
-        "-lr", "--learning_rate", type=float, default=1e-3, help="Learning rate (default: 1e-3)"
+        "-lr", "--learning_rate", type=float, default=1e-4, help="Learning rate (default: 1e-4)"
     )
     args = parser.parse_args()
 
