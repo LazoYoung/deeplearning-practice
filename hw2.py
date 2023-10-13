@@ -50,9 +50,9 @@ class TitanicModel(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(n_input, wandb.config.n_hidden_unit_list[0]),
-            nn.PReLU(),
+            nn.LeakyReLU(0.01),
             nn.Linear(wandb.config.n_hidden_unit_list[0], wandb.config.n_hidden_unit_list[1]),
-            nn.PReLU(),
+            nn.LeakyReLU(0.01),
             nn.Linear(wandb.config.n_hidden_unit_list[1], 1),
         )
 
