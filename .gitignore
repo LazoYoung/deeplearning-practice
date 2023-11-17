@@ -1,4 +1,7 @@
+# IDE cache
 /.idea
 
-# wandb runs
+# training cache
+/_00_data
 /wandb
+/checkpoints
