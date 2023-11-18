@@ -5,20 +5,24 @@ from datetime import datetime
 import torch
 from torch import nn
 from torch import optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, ConcatDataset
 from torchvision import datasets
 from torchvision.transforms import transforms
 
 import wandb
-from _01_code._06_fcn_best_practice.c_trainer import EarlyStopping
-from _01_code._08_diverse_techniques.a_arg_parser import get_parser
-from _01_code._99_common_utils.utils import strfdelta
 
+# Global variables
+PROJECT_NAME = "hw3_fashion_mnist"
 BASE_PATH = '.'
 # BASE_PATH = '/content/drive/MyDrive/Colab Notebooks'
-print(BASE_PATH)
 
+# Appending BASE_PATH to system path
 sys.path.append(BASE_PATH)
+
+# Importing external code...
+# must be done after appending BASE_PATH to system path
+from _01_code._06_fcn_best_practice.c_trainer import EarlyStopping
+from _01_code._99_common_utils.utils import strfdelta
 
 CHECKPOINT_PATH = os.path.join(BASE_PATH, "checkpoints")
 if not os.path.isdir(CHECKPOINT_PATH):
@@ -85,7 +89,7 @@ class Trainer:
                     "Training speed (epochs/sec.)": epoch_per_second,
                 })
 
-                if early_stop:
+                if early_stop:  # Discontinue training if we run out of patience...
                     break
 
         elapsed_time = datetime.now() - training_start_time
@@ -107,7 +111,7 @@ class Trainer:
             loss = self.loss_fn(output_tensor, target_tensor)
             loss_sum += loss.item()  # aggregate loss (assert it's scalar)
 
-            # decode one-hot prediction
+            # decode one-hot vectors
             predicted_tensor = torch.argmax(output_tensor, dim=1)
             correct_num += torch.sum(torch.eq(predicted_tensor, target_tensor)).item()
             trained_sample_num += len(input_tensor)
@@ -151,69 +155,58 @@ class Trainer:
         return validation_loss, validation_accuracy
 
 
-def get_fashion_mnist_data():
+def get_fashion_mnist_data(augmented: bool, num_workers=1):
     data_path = os.path.join(BASE_PATH, "_00_data", "j_fashion_mnist")
     f_mnist_train = datasets.FashionMNIST(data_path, train=True, download=True, transform=transforms.ToTensor())
     f_mnist_train, f_mnist_validation = random_split(f_mnist_train, [55_000, 5_000])
-    f_train_mean, f_train_std = get_statistic(f_mnist_train)
+
+    if augmented:
+        train_transforms = nn.Sequential(
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomAdjustSharpness(sharpness_factor=0.1, p=0.5),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+        )
+        transformed = []
+        for image, label in f_mnist_train:
+            transformed_image = train_transforms(image)
+            transformed.append((transformed_image, label))
+        f_mnist_train = ConcatDataset([f_mnist_train, transformed])
+
+    # get mean, standard deviation of training dataset
+    f_train_mean, f_train_std = get_statistic(f_mnist_train, dim=3)
+
+    # A transformer that normalizes the dataset
+    f_mnist_transforms = nn.Sequential(
+        transforms.ConvertImageDtype(torch.float),
+        transforms.Normalize(mean=f_train_mean, std=f_train_std),
+    )
 
     print("Num Train Samples: ", len(f_mnist_train))
     print("Num Validation Samples: ", len(f_mnist_validation))
     print("Sample Shape: ", f_mnist_train[0][0].shape)  # torch.Size([1, 28, 28])
     print("Label Shape: ", type(f_mnist_train[0][1]))
     print("Mean: ", f_train_mean, ", Std: ", f_train_std)
-
-    num_data_loading_workers = 1
-    print("Number of Data Loading Workers:", num_data_loading_workers)
+    print("Number of Data Loading Workers:", num_workers)
 
     train_data_loader = DataLoader(
         dataset=f_mnist_train, batch_size=wandb.config.batch_size, shuffle=True,
-        pin_memory=True, num_workers=num_data_loading_workers
+        pin_memory=True, num_workers=num_workers
     )
 
     validation_data_loader = DataLoader(
         dataset=f_mnist_validation, batch_size=wandb.config.batch_size,
-        pin_memory=True, num_workers=num_data_loading_workers
-    )
-
-    f_mnist_transforms = nn.Sequential(
-        transforms.ConvertImageDtype(torch.float),
-        transforms.Normalize(mean=f_train_mean, std=f_train_std),
+        pin_memory=True, num_workers=num_workers
     )
 
     return train_data_loader, validation_data_loader, f_mnist_transforms
 
 
-def get_fashion_mnist_test_data():
-    data_path = os.path.join(BASE_PATH, "_00_data", "j_fashion_mnist")
-    f_mnist_test_images = datasets.FashionMNIST(data_path, train=False, download=True)
-    f_mnist_test = datasets.FashionMNIST(data_path, train=False, download=True, transform=transforms.ToTensor())
-    f_test_mean, f_test_std = get_statistic(f_mnist_test)
-
-    print("Num Test Samples: ", len(f_mnist_test))
-    print("Sample Shape: ", f_mnist_test[0][0].shape)  # torch.Size([1, 28, 28])
-    print("Mean: ", f_test_mean, ", Std: ", f_test_std)
-
-    test_data_loader = DataLoader(dataset=f_mnist_test, batch_size=len(f_mnist_test))
-    f_mnist_transforms = nn.Sequential(
-        transforms.ConvertImageDtype(torch.float),
-        transforms.Normalize(mean=f_test_mean, std=f_test_std),
-    )
-
-    return f_mnist_test_images, test_data_loader, f_mnist_transforms
-
-
-def get_statistic(subset):
-    dataset = torch.stack([t for t, _ in subset], dim=3)
+def get_statistic(dataset, dim):
+    dataset = torch.stack([t for t, _ in dataset], dim=dim)
     mean = dataset.view(-1).mean().item()
     std = dataset.view(-1).std().item()
 
     return mean, std
-
-
-def get_augmented_fashion_mnist_data():
-    # todo augment the dataset
-    return get_fashion_mnist_data()
 
 
 def get_fashion_mnist_model():
@@ -226,15 +219,18 @@ def get_fashion_mnist_model():
                 nn.Conv2d(in_channels=in_channel, out_channels=6, kernel_size=(5, 5), stride=(1, 1)),
                 # B x 6 x 24 x 24 --> B x 6 x 12 x 12
                 nn.MaxPool2d(kernel_size=2, stride=2),
+                nn.BatchNorm2d(num_features=6),
                 nn.ReLU(),
                 # B x 6 x 12 x 12 --> B x 16 x (12 - 5 + 1) x (12 - 5 + 1) = B x 16 x 8 x 8
                 nn.Conv2d(in_channels=6, out_channels=16, kernel_size=(5, 5), stride=(1, 1)),
                 # B x 16 x 8 x 8 --> B x 16 x 4 x 4
                 nn.MaxPool2d(kernel_size=2, stride=2),
+                nn.BatchNorm2d(num_features=16),
                 nn.ReLU(),
                 nn.Flatten(),
-                nn.Dropout(p=0.5),
+                nn.Dropout(p=0.3),
                 nn.Linear(256, 128),
+                nn.BatchNorm1d(num_features=128),
                 nn.ReLU(),
                 nn.Dropout(p=0.5),
                 nn.Linear(128, n_output),
@@ -246,21 +242,20 @@ def get_fashion_mnist_model():
     return MyModel(in_channel=1, n_output=10)
 
 
-def main(args):
+def main(online=False):
     config = {
-        'epochs': args.epochs,
-        'batch_size': args.batch_size,
-        'validation_intervals': args.validation_intervals,
-        'learning_rate': args.learning_rate,
-        'early_stop_patience': args.early_stop_patience,
-        'early_stop_delta': args.early_stop_delta,
-        'weight_decay': args.weight_decay,
-        'dropout': args.dropout,
-        'normalization': args.normalization,
-        'augment': args.augment,
+        'epochs': 500,
+        'batch_size': 2048,
+        'validation_intervals': 10,
+        'learning_rate': 1e-3,
+        'early_stop_patience': 10,
+        'early_stop_delta': 1e-5,
+        'weight_decay': 0.0,
+        'dropout': True,
+        'augment': True,
     }
 
-    if args.augment:
+    if config['augment']:
         augment_name = "image_augment"
     else:
         augment_name = "no_image_augment"
@@ -268,45 +263,31 @@ def main(args):
     run_time_str = datetime.now().astimezone().strftime('%Y-%m-%d_%H-%M-%S')
     name = "{0}_{1}".format(augment_name, run_time_str)
 
-    project_name = "hw3_fashion_mnist"
     wandb.init(
-        mode="online" if args.wandb else "disabled",
-        project=project_name,
+        mode="online" if online else "offline",
+        project=PROJECT_NAME,
         notes="fashion mnist dataset",
         tags=["cnn", "fashion_mnist", "image_augment"],
         name=name,
         config=config
     )
-    print(args)
     print(wandb.config)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Training on device {device}.")
 
-    if wandb.config.augment:
-        train_data_loader, validation_data_loader, transforms = get_augmented_fashion_mnist_data()
-    else:
-        train_data_loader, validation_data_loader, transforms = get_fashion_mnist_data()
-
-    model = get_fashion_mnist_model()
-    model.to(device)
-    wandb.watch(model)
+    train_data_loader, validation_data_loader, train_transforms = get_fashion_mnist_data(wandb.config.augment)
+    train_model = get_fashion_mnist_model()
+    train_model.to(device)
+    wandb.watch(train_model)
 
     from torchinfo import summary
-    summary(model, input_size=(1, 1, 28, 28))
+    summary(train_model, input_size=(1, 1, 28, 28))
 
-    optimizers = [
-        optim.SGD(model.parameters(), lr=wandb.config.learning_rate, weight_decay=args.weight_decay),
-        optim.SGD(model.parameters(), lr=wandb.config.learning_rate, momentum=0.9, weight_decay=args.weight_decay),
-        optim.RMSprop(model.parameters(), lr=wandb.config.learning_rate, weight_decay=args.weight_decay),
-        optim.Adam(model.parameters(), lr=wandb.config.learning_rate, weight_decay=args.weight_decay)
-    ]
-
-    print("Optimizer:", optimizers[args.optimizer])
-
+    optimizer = optim.Adam(train_model.parameters(), lr=wandb.config.learning_rate, weight_decay=wandb.config.weight_decay)
     trainer = Trainer(
-        project_name, model, optimizers[args.optimizer],
-        train_data_loader, validation_data_loader, transforms,
+        PROJECT_NAME, train_model, optimizer,
+        train_data_loader, validation_data_loader, train_transforms,
         run_time_str, wandb, device, CHECKPOINT_PATH
     )
     trainer.run()
@@ -314,6 +295,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
-    main(args)
+    main()
